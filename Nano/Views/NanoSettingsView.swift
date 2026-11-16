@@ -975,7 +975,7 @@ private struct IslandSettingsPane: View {
                     SettingsSection(
                         "Size",
                         footer: settings.placement == .attached
-                            ? "Around the notch, the island never gets smaller than the camera housing."
+                            ? "Around the notch, the lowest width hugs the notch. The island never gets narrower than the camera housing."
                             : nil
                     ) {
                         pointSliderRow(

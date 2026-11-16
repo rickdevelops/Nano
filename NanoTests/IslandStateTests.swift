@@ -904,21 +904,30 @@ final class IslandStateTests: XCTestCase {
     }
 
     @MainActor
-    func testNotchStillFloorsAShrunkIdleIsland() {
+    func testNotchIdleWidthScalesDownToTheNotch() {
         let suiteName = "NanoTests.idleNotch.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let settings = NanoSettings(defaults: defaults)
         settings.placement = .attached
-        settings.islandGeometry.idleWidth = 200
-        settings.islandGeometry.idleHeight = 28
         let viewModel = IslandViewModel(settings: settings)
         viewModel.notchWidth = 185
         viewModel.notchHeight = 38
 
-        let size = viewModel.preferredSize
-        XCTAssertEqual(size.width, 185 + viewModel.compactSideZone * 2 + 44)
-        XCTAssertEqual(size.height, 38, "The island never ends above the camera housing")
+        let legacy = 185 + viewModel.compactSideZone * 2 + 44
+        XCTAssertEqual(viewModel.preferredSize.width, legacy, "Defaults keep the width the notch island always had")
+
+        settings.islandGeometry.idleWidth = 260
+        let narrower = viewModel.preferredSize.width
+        XCTAssertLessThan(narrower, legacy)
+        XCTAssertGreaterThan(narrower, 185)
+
+        settings.islandGeometry.idleWidth = IslandGeometry.idleWidthRange.lowerBound
+        XCTAssertEqual(viewModel.preferredSize.width, 185, "The lowest value hugs the notch")
+        XCTAssertLessThan(IslandGeometry.idleWidthRange.lowerBound, 185, "The slider reaches below the notch")
+
+        settings.islandGeometry.idleHeight = 28
+        XCTAssertEqual(viewModel.preferredSize.height, 38, "The island never ends above the camera housing")
     }
 
     @MainActor

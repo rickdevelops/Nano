@@ -83,7 +83,7 @@ enum IslandAppearance: String, CaseIterable, Identifiable, Codable, Sendable {
 /// never exceeds half the idle height, so a stored geometry is always one the
 /// island can draw.
 struct IslandGeometry: Equatable, Sendable {
-    static let idleWidthRange: ClosedRange<CGFloat> = 200...480
+    static let idleWidthRange: ClosedRange<CGFloat> = 160...480
     static let idleHeightRange: ClosedRange<CGFloat> = 28...44
     static let expandedCornerRadiusRange: ClosedRange<CGFloat> = 12...36
     static let floatingTopOffsetRange: ClosedRange<CGFloat> = 0...40

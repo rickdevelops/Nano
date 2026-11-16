@@ -445,12 +445,20 @@ final class IslandViewModel: ObservableObject {
             guard notchWidth > 0 else {
                 return CGSize(width: compact.width + flare + peek, height: compact.height)
             }
+            // Around a notch the side zones that carry the compact content are
+            // what make the island wide. The Idle width slider scales them:
+            // the default keeps today's width, and the lowest value shrinks the
+            // island until it just hugs the notch (never narrower than it, so
+            // hovering the notch still opens it).
             let layoutPadding: CGFloat = settings.placement == .attached ? 44 : 24
+            let standardWidth = IslandGeometry.standard.idleWidth
+            let lowestWidth = IslandGeometry.idleWidthRange.lowerBound
+            let chosen = compact.width
+            let sideShare = min(1, max(0, (chosen - lowestWidth) / (standardWidth - lowestWidth)))
+            let extra = max(0, chosen - standardWidth)
+            let sides = (compactSideZone * 2 + layoutPadding) * sideShare + extra
             return CGSize(
-                width: max(
-                    compact.width + flare,
-                    notchWidth + compactSideZone * 2 + layoutPadding
-                ) + peek,
+                width: notchWidth + sides + peek,
                 height: max(compact.height, notchHeight)
             )
         }
