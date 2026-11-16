@@ -971,6 +971,59 @@ private struct IslandSettingsPane: View {
                             .controlSize(.small)
                     }
                     .settingsAnchor("island.reset")
+
+                    SettingsSection(
+                        "Size",
+                        footer: settings.placement == .attached
+                            ? "Around the notch, the island never gets smaller than the camera housing."
+                            : nil
+                    ) {
+                        pointSliderRow(
+                            "Idle width",
+                            value: $settings.islandGeometry.idleWidth,
+                            range: IslandGeometry.idleWidthRange,
+                            focus: .idleWidth
+                        )
+                        .settingsAnchor("island.idleWidth")
+                        pointSliderRow(
+                            "Idle height",
+                            value: $settings.islandGeometry.idleHeight,
+                            range: IslandGeometry.idleHeightRange,
+                            focus: .idleHeight
+                        )
+                        .settingsAnchor("island.idleHeight")
+                        pointSliderRow(
+                            "Idle corner radius",
+                            value: $settings.islandGeometry.idleCornerRadius,
+                            range: settings.islandGeometry.idleCornerRadiusRange,
+                            focus: .idleCorner
+                        )
+                        .settingsAnchor("island.idleCorner")
+                        pointSliderRow(
+                            "Open corner radius",
+                            value: $settings.islandGeometry.expandedCornerRadius,
+                            range: IslandGeometry.expandedCornerRadiusRange,
+                            focus: .openCorner
+                        )
+                        .settingsAnchor("island.openCorner")
+                        if settings.placement == .floating {
+                            pointSliderRow(
+                                "Distance from top",
+                                value: $settings.islandGeometry.floatingTopOffset,
+                                range: IslandGeometry.floatingTopOffsetRange,
+                                focus: .topOffset
+                            )
+                            .settingsAnchor("island.topOffset")
+                        }
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button("Reset Size") { settings.resetIslandGeometry() }
+                            .controlSize(.small)
+                            .disabled(settings.islandGeometry == .standard)
+                    }
+                    .settingsAnchor("island.resetSize")
             }
         }
     }
@@ -1007,10 +1060,42 @@ private struct IslandSettingsPane: View {
         }
         .onHover { if $0 { focus = target } }
     }
+
+    /// A slider for a length, labelled in points rather than percent.
+    private func pointSliderRow(
+        _ title: String,
+        value: Binding<CGFloat>,
+        range: ClosedRange<CGFloat>,
+        focus target: IslandPreviewFocus
+    ) -> some View {
+        SettingsRow(title) {
+            Slider(value: value, in: range, step: 1) { editing in
+                if editing { focus = target }
+            }
+            .labelsHidden()
+            .controlSize(.small)
+            .frame(width: 200)
+            Text("\(Int(value.wrappedValue.rounded())) pt")
+                .font(.system(size: 12, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: 44, alignment: .trailing)
+        }
+        .onHover { if $0 { focus = target } }
+    }
 }
 
 private enum IslandPreviewFocus {
     case shape, surface, surfaceColor, tint, opacity, glass, midpoint
+    case idleWidth, idleHeight, idleCorner, openCorner, topOffset
+
+    /// Size rows preview the closed island, since that is what they change.
+    var showsIdleIsland: Bool {
+        switch self {
+        case .idleWidth, .idleHeight, .idleCorner, .topOffset: true
+        default: false
+        }
+    }
 
     var title: String {
         switch self {
@@ -1021,6 +1106,11 @@ private enum IslandPreviewFocus {
         case .opacity: "Surface opacity"
         case .glass: "Glass intensity"
         case .midpoint: "Gradient midpoint"
+        case .idleWidth: "Idle width"
+        case .idleHeight: "Idle height"
+        case .idleCorner: "Idle corner radius"
+        case .openCorner: "Open corner radius"
+        case .topOffset: "Distance from top"
         }
     }
 
@@ -1033,6 +1123,11 @@ private enum IslandPreviewFocus {
         case .opacity: "Lower lets more of the wallpaper through."
         case .glass: "How strongly the glass blurs what's behind it."
         case .midpoint: "Where Hybrid's black gives way to glass."
+        case .idleWidth: "How wide the island is while you're not using it."
+        case .idleHeight: "How tall the island is while you're not using it."
+        case .idleCorner: "From square corners to a full capsule."
+        case .openCorner: "How rounded the dashboard is when it opens."
+        case .topOffset: "How far the floating island sits below the top of the screen."
         }
     }
 }
@@ -1075,8 +1170,14 @@ private struct IslandLivePreview: View {
                     .background(Color.black.opacity(0.22))
                     Spacer()
                 }
-                island
-                    .padding(.top, attached ? 0 : 28)
+                Group {
+                    if focus.showsIdleIsland {
+                        idleIsland
+                    } else {
+                        island
+                    }
+                }
+                .padding(.top, attached ? 0 : 20 + settings.islandGeometry.floatingTopOffset)
             }
             .frame(maxWidth: .infinity)
             .frame(height: sceneHeight)
@@ -1088,6 +1189,8 @@ private struct IslandLivePreview: View {
             .environment(\.colorScheme, .dark)
             .accessibilityLabel("Island preview")
             .animation(.easeOut(duration: 0.25), value: settings.placement)
+            .animation(.easeOut(duration: 0.2), value: settings.islandGeometry)
+            .animation(.easeOut(duration: 0.25), value: focus.showsIdleIsland)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(focus.title)
@@ -1108,7 +1211,7 @@ private struct IslandLivePreview: View {
         // radius, and room for the notch only when it hangs from one.
         let inset = DashboardLayout.inset
         let notchRoom: CGFloat = attached ? 22 : 0
-        let radius = IslandHitGeometry.cornerRadius(expanded: true)
+        let radius = IslandHitGeometry.cornerRadius(expanded: true, geometry: settings.islandGeometry)
         let size = CGSize(width: 760, height: notchRoom + DashboardLayout.fullHeight + inset * 2)
         let shape = attached
             ? AnyShape(UnevenRoundedRectangle(bottomLeadingRadius: radius, bottomTrailingRadius: radius, style: .continuous))
@@ -1144,6 +1247,32 @@ private struct IslandLivePreview: View {
         .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
         .scaleEffect(islandScale, anchor: .top)
         .frame(width: islandWidth, height: size.height * islandScale, alignment: .top)
+    }
+
+    /// The closed island at its chosen size. Drawn larger than the dashboard
+    /// preview so a few points of width or height are still visible.
+    private var idleIsland: some View {
+        let geometry = settings.islandGeometry
+        let scale: CGFloat = 0.75
+        let radius = IslandHitGeometry.cornerRadius(expanded: false, geometry: geometry)
+        let shape = attached
+            ? AnyShape(UnevenRoundedRectangle(bottomLeadingRadius: radius, bottomTrailingRadius: radius, style: .continuous))
+            : AnyShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        return IslandSurfaceBackground(
+            appearance: settings.appearance,
+            blackOpacity: settings.blackOpacity,
+            glassIntensity: settings.blurIntensity,
+            gradientMidpoint: settings.gradientMidpoint,
+            surfaceColor: settings.surfaceColor,
+            glassTintColor: settings.glassTintColor,
+            cornerRadius: radius
+        )
+        .frame(width: geometry.idleWidth, height: geometry.idleHeight)
+        .clipShape(shape)
+        .overlay { shape.stroke(Color.white.opacity(settings.appearance == .solidBlack ? 0.08 : 0.2), lineWidth: 1.2) }
+        .shadow(color: .black.opacity(0.34), radius: 9, y: 4)
+        .scaleEffect(scale, anchor: .top)
+        .frame(width: geometry.idleWidth * scale, height: geometry.idleHeight * scale, alignment: .top)
     }
 }
 

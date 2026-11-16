@@ -48,6 +48,7 @@ Everything runs on your Mac. No account, no analytics, no ads.
 
 **Look and feel**
 - Notch or floating placement
+- Adjustable idle size, corner radius and distance from the top edge
 - Solid Black, Liquid Glass or Hybrid appearance
 - Choose and arrange the widgets on the dashboard
 

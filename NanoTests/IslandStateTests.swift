@@ -847,6 +847,133 @@ final class IslandStateTests: XCTestCase {
         XCTAssertFalse(IslandPhase.idleCompact.isExpanded)
     }
 
+    // MARK: Island geometry (issue #2)
+
+    func testStandardIslandGeometryIsTheOriginalLook() {
+        let standard = IslandGeometry.standard
+        XCTAssertEqual(standard.idleSize, IslandPhase.idleCompact.preferredSize)
+        XCTAssertEqual(standard.idleCornerRadius, 18)
+        XCTAssertEqual(standard.expandedCornerRadius, 28)
+        XCTAssertEqual(standard.floatingTopOffset, 8)
+        XCTAssertEqual(IslandHitGeometry.cornerRadius(expanded: false), 18)
+        XCTAssertEqual(IslandHitGeometry.cornerRadius(expanded: true), 28)
+        XCTAssertEqual(IslandHitGeometry.cornerRadius(expanded: true, hud: true), 22)
+    }
+
+    func testIslandGeometryKeepsEveryValueInRange() {
+        var geometry = IslandGeometry(
+            idleWidth: 10,
+            idleHeight: 100,
+            idleCornerRadius: 99,
+            expandedCornerRadius: 0,
+            floatingTopOffset: -5
+        )
+        XCTAssertEqual(geometry.idleWidth, IslandGeometry.idleWidthRange.lowerBound)
+        XCTAssertEqual(geometry.idleHeight, IslandGeometry.idleHeightRange.upperBound)
+        XCTAssertEqual(geometry.idleCornerRadius, geometry.idleHeight / 2, "A corner can't pass a full capsule")
+        XCTAssertEqual(geometry.expandedCornerRadius, IslandGeometry.expandedCornerRadiusRange.lowerBound)
+        XCTAssertEqual(geometry.floatingTopOffset, 0)
+
+        geometry.idleHeight = 28
+        XCTAssertEqual(geometry.idleCornerRadius, 14, "Lowering the height pulls the corner in with it")
+
+        geometry.idleWidth = 9_999
+        XCTAssertEqual(geometry.idleWidth, IslandGeometry.idleWidthRange.upperBound)
+        geometry.idleWidth = .nan
+        XCTAssertEqual(geometry.idleWidth, IslandGeometry.idleWidthRange.lowerBound)
+        geometry.floatingTopOffset = 100
+        XCTAssertEqual(geometry.floatingTopOffset, IslandGeometry.floatingTopOffsetRange.upperBound)
+    }
+
+    @MainActor
+    func testFloatingIdleIslandUsesTheChosenSize() {
+        let suiteName = "NanoTests.idleSize.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = NanoSettings(defaults: defaults)
+        settings.placement = .floating
+        let viewModel = IslandViewModel(settings: settings)
+        viewModel.notchWidth = 0
+
+        XCTAssertEqual(viewModel.preferredSize, CGSize(width: 360, height: 44), "Defaults leave the island as it was")
+
+        settings.islandGeometry.idleWidth = 240
+        settings.islandGeometry.idleHeight = 32
+        XCTAssertEqual(viewModel.phase, .idleCompact)
+        XCTAssertEqual(viewModel.preferredSize, CGSize(width: 240, height: 32))
+    }
+
+    @MainActor
+    func testNotchStillFloorsAShrunkIdleIsland() {
+        let suiteName = "NanoTests.idleNotch.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = NanoSettings(defaults: defaults)
+        settings.placement = .attached
+        settings.islandGeometry.idleWidth = 200
+        settings.islandGeometry.idleHeight = 28
+        let viewModel = IslandViewModel(settings: settings)
+        viewModel.notchWidth = 185
+        viewModel.notchHeight = 38
+
+        let size = viewModel.preferredSize
+        XCTAssertEqual(size.width, 185 + viewModel.compactSideZone * 2 + 44)
+        XCTAssertEqual(size.height, 38, "The island never ends above the camera housing")
+    }
+
+    @MainActor
+    func testIslandGeometryPersistsAndResets() {
+        let suiteName = "NanoTests.idleGeometryPersist.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let custom = IslandGeometry(
+            idleWidth: 260,
+            idleHeight: 34,
+            idleCornerRadius: 10,
+            expandedCornerRadius: 20,
+            floatingTopOffset: 16
+        )
+
+        let settings = NanoSettings(defaults: defaults)
+        XCTAssertEqual(settings.islandGeometry, .standard)
+        settings.islandGeometry = custom
+        XCTAssertEqual(NanoSettings(defaults: defaults).islandGeometry, custom)
+
+        settings.resetIslandGeometry()
+        XCTAssertEqual(settings.islandGeometry, .standard)
+        XCTAssertEqual(NanoSettings(defaults: defaults).islandGeometry, .standard)
+    }
+
+    @MainActor
+    func testOutOfRangeStoredGeometryIsClampedOnLoad() {
+        let suiteName = "NanoTests.idleGeometryClampLoad.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(5.0, forKey: "island.idleWidth")
+        defaults.set(80.0, forKey: "island.floatingTopOffset")
+
+        let geometry = NanoSettings(defaults: defaults).islandGeometry
+        XCTAssertEqual(geometry.idleWidth, IslandGeometry.idleWidthRange.lowerBound)
+        XCTAssertEqual(geometry.floatingTopOffset, IslandGeometry.floatingTopOffsetRange.upperBound)
+        XCTAssertEqual(geometry.idleHeight, IslandGeometry.standard.idleHeight)
+    }
+
+    func testHitPathFollowsTheChosenCornerRadius() {
+        let rect = CGRect(x: 0, y: 0, width: 240, height: 32)
+        let corner = CGPoint(x: 1, y: 31)
+        var square = IslandGeometry.standard
+        square.idleCornerRadius = 0
+
+        XCTAssertFalse(
+            IslandHitGeometry.contains(corner, in: rect, placement: .floating, expanded: false),
+            "The standard rounded corner leaves the bounding-box corner outside"
+        )
+        XCTAssertTrue(
+            IslandHitGeometry.contains(corner, in: rect, placement: .floating, expanded: false, geometry: square),
+            "A square island is hit right up to its corner"
+        )
+    }
+
     func testCompactAgentActivityGroupsSessionsByProvider() throws {
         let now = Date()
         var codexOne = AgentSession(
@@ -2749,6 +2876,20 @@ final class IslandStateTests: XCTestCase {
         settings.setEnabled(false, for: .cue)
         XCTAssertFalse(SettingsSearchItem.search("cue", settings: settings).contains { $0.destination == .cue },
                        "hidden pages aren't offered")
+    }
+
+    @MainActor
+    func testSettingsSearchFindsIslandSizeRows() {
+        let settings = NanoSettings(defaults: UserDefaults(suiteName: "nano-search-size-\(UUID().uuidString)")!)
+        settings.placement = .floating
+        XCTAssertEqual(SettingsSearchItem.search("idle width", settings: settings).first?.anchor, "island.idleWidth")
+        XCTAssertTrue(SettingsSearchItem.search("distance", settings: settings).contains { $0.anchor == "island.topOffset" })
+
+        settings.placement = .attached
+        XCTAssertFalse(
+            SettingsSearchItem.search("distance", settings: settings).contains { $0.anchor == "island.topOffset" },
+            "The top gap only exists for a floating island"
+        )
     }
 
     @MainActor
