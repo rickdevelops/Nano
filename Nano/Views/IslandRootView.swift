@@ -311,7 +311,8 @@ struct IslandRootView: View {
     private var cornerRadius: CGFloat {
         IslandHitGeometry.cornerRadius(
             expanded: viewModel.phase.showsDashboard,
-            hud: viewModel.phase == .transientHUD || showsOnboardingIsland
+            hud: viewModel.phase == .transientHUD || showsOnboardingIsland,
+            geometry: settings.islandGeometry
         )
     }
 

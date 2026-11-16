@@ -215,9 +215,15 @@ extension NSScreen {
 /// path — not the bounding rectangle — so the menu bar beside a notch, or the
 /// rounded-corner cutouts of a floating island, cannot activate it.
 enum IslandHitGeometry {
-    static func cornerRadius(expanded: Bool, hud: Bool = false) -> CGFloat {
+    /// HUD cards keep their own radius; the idle and open island follow
+    /// Settings › Island. `standard` is the original 18 closed, 28 open.
+    static func cornerRadius(
+        expanded: Bool,
+        hud: Bool = false,
+        geometry: IslandGeometry = .standard
+    ) -> CGFloat {
         if hud { return 22 }
-        return expanded ? 28 : 18
+        return expanded ? geometry.expandedCornerRadius : geometry.idleCornerRadius
     }
 
     static func notchFlare(expanded: Bool, hud: Bool = false) -> CGFloat {
@@ -228,7 +234,8 @@ enum IslandHitGeometry {
     static func path(
         in rect: CGRect,
         placement: IslandPlacement,
-        expanded: Bool
+        expanded: Bool,
+        geometry: IslandGeometry = .standard
     ) -> CGPath {
         guard !rect.isEmpty else {
             return CGPath(rect: .zero, transform: nil)
@@ -238,12 +245,12 @@ enum IslandHitGeometry {
         let shape: Path = switch placement {
         case .attached:
             NanoNotchShape(
-                bottomRadius: cornerRadius(expanded: expanded),
+                bottomRadius: cornerRadius(expanded: expanded, geometry: geometry),
                 flare: notchFlare(expanded: expanded)
             ).path(in: local)
         case .floating:
             RoundedRectangle(
-                cornerRadius: cornerRadius(expanded: expanded),
+                cornerRadius: cornerRadius(expanded: expanded, geometry: geometry),
                 style: .continuous
             ).path(in: local)
         }
@@ -258,9 +265,10 @@ enum IslandHitGeometry {
         _ point: CGPoint,
         in rect: CGRect,
         placement: IslandPlacement,
-        expanded: Bool
+        expanded: Bool,
+        geometry: IslandGeometry = .standard
     ) -> Bool {
-        path(in: rect, placement: placement, expanded: expanded)
+        path(in: rect, placement: placement, expanded: expanded, geometry: geometry)
             .contains(point, using: .winding, transform: .identity)
     }
 
@@ -560,6 +568,7 @@ final class IslandPanelController {
         var dockedRect: NSRect?
         var placement: IslandPlacement
         var expanded: Bool
+        var geometry: IslandGeometry
     }
 
     init(settings: NanoSettings, viewModel: IslandViewModel) {
@@ -697,6 +706,18 @@ final class IslandPanelController {
             }
             .store(in: &cancellables)
 
+        // Only the floating gap moves the panel. A new idle size or corner
+        // reaches the hit path through the view model's objectWillChange.
+        settings.$islandGeometry
+            .map(\.floatingTopOffset)
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.reposition()
+                }
+            }
+            .store(in: &cancellables)
+
         settings.$followActiveDisplay
             .removeDuplicates()
             .sink { [weak self] _ in
@@ -793,7 +814,8 @@ final class IslandPanelController {
             mouse,
             in: island,
             placement: settings.placement,
-            expanded: viewModel.phase.isExpanded
+            expanded: viewModel.phase.isExpanded,
+            geometry: settings.islandGeometry
         ) {
             return true
         }
@@ -1091,7 +1113,9 @@ final class IslandPanelController {
     private func reposition() {
         let screen = targetScreen()
         let obstruction = NanoDisplayObstruction.measure(screen: screen)
-        let topGap: CGFloat = settings.placement == .floating ? 8 : 0
+        let topGap: CGFloat = settings.placement == .floating
+            ? settings.islandGeometry.floatingTopOffset
+            : 0
         let origin = NSPoint(
             x: (screen.frame.midX - stageSize.width / 2).rounded(),
             y: (screen.frame.maxY - topGap - stageSize.height).rounded()
@@ -1125,14 +1149,16 @@ final class IslandPanelController {
             voiceRect: chrome?.voice,
             dockedRect: docked,
             placement: settings.placement,
-            expanded: viewModel.phase.isExpanded
+            expanded: viewModel.phase.isExpanded,
+            geometry: settings.islandGeometry
         )
         if lastHitSignature != signature {
             lastHitSignature = signature
             let islandPath = IslandHitGeometry.path(
                 in: rect,
                 placement: signature.placement,
-                expanded: signature.expanded
+                expanded: signature.expanded,
+                geometry: signature.geometry
             )
             if let docked {
                 let dockedPath = IslandHitGeometry.dockedPath(in: docked)

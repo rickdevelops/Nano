@@ -437,7 +437,9 @@ final class IslandViewModel: ObservableObject {
         }
 
         guard phase.isExpanded else {
-            let compact = phase.preferredSize
+            // The size chosen in Settings › Island. Around a notch it is a
+            // floor, never a cut: the camera housing always stays covered.
+            let compact = settings.islandGeometry.idleSize
             let flare: CGFloat = settings.placement == .attached ? 44 : 0
             let peek: CGFloat = mediaPeek == nil ? 0 : Self.mediaPeekWidth
             guard notchWidth > 0 else {
@@ -449,7 +451,7 @@ final class IslandViewModel: ObservableObject {
                     compact.width + flare,
                     notchWidth + compactSideZone * 2 + layoutPadding
                 ) + peek,
-                height: compact.height
+                height: max(compact.height, notchHeight)
             )
         }
         let baseSize: CGSize
