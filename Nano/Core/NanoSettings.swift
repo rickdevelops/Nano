@@ -75,6 +75,77 @@ enum IslandAppearance: String, CaseIterable, Identifiable, Codable, Sendable {
     }
 }
 
+/// The closed island's size and corners, the open island's corners, and how
+/// far a floating island sits below the top edge. `standard` is the look Nano
+/// has always had, so nothing moves until someone changes a value.
+///
+/// Every value is kept inside its range as it is set, and the idle corner
+/// never exceeds half the idle height, so a stored geometry is always one the
+/// island can draw.
+struct IslandGeometry: Equatable, Sendable {
+    static let idleWidthRange: ClosedRange<CGFloat> = 200...480
+    static let idleHeightRange: ClosedRange<CGFloat> = 28...44
+    static let expandedCornerRadiusRange: ClosedRange<CGFloat> = 12...36
+    static let floatingTopOffsetRange: ClosedRange<CGFloat> = 0...40
+
+    static let standard = IslandGeometry(
+        idleWidth: 360,
+        idleHeight: 44,
+        idleCornerRadius: 18,
+        expandedCornerRadius: 28,
+        floatingTopOffset: 8
+    )
+
+    var idleWidth: CGFloat {
+        didSet { idleWidth = Self.clamp(idleWidth, to: Self.idleWidthRange) }
+    }
+
+    var idleHeight: CGFloat {
+        didSet {
+            idleHeight = Self.clamp(idleHeight, to: Self.idleHeightRange)
+            idleCornerRadius = Self.clamp(idleCornerRadius, to: idleCornerRadiusRange)
+        }
+    }
+
+    var idleCornerRadius: CGFloat {
+        didSet { idleCornerRadius = Self.clamp(idleCornerRadius, to: idleCornerRadiusRange) }
+    }
+
+    var expandedCornerRadius: CGFloat {
+        didSet { expandedCornerRadius = Self.clamp(expandedCornerRadius, to: Self.expandedCornerRadiusRange) }
+    }
+
+    var floatingTopOffset: CGFloat {
+        didSet { floatingTopOffset = Self.clamp(floatingTopOffset, to: Self.floatingTopOffsetRange) }
+    }
+
+    init(
+        idleWidth: CGFloat,
+        idleHeight: CGFloat,
+        idleCornerRadius: CGFloat,
+        expandedCornerRadius: CGFloat,
+        floatingTopOffset: CGFloat
+    ) {
+        // Property observers don't run in an initializer, so clamp here too.
+        let height = Self.clamp(idleHeight, to: Self.idleHeightRange)
+        self.idleWidth = Self.clamp(idleWidth, to: Self.idleWidthRange)
+        self.idleHeight = height
+        self.idleCornerRadius = Self.clamp(idleCornerRadius, to: 0...(height / 2))
+        self.expandedCornerRadius = Self.clamp(expandedCornerRadius, to: Self.expandedCornerRadiusRange)
+        self.floatingTopOffset = Self.clamp(floatingTopOffset, to: Self.floatingTopOffsetRange)
+    }
+
+    /// Square corners up to a full capsule at the current height.
+    var idleCornerRadiusRange: ClosedRange<CGFloat> { 0...(idleHeight / 2) }
+
+    var idleSize: CGSize { CGSize(width: idleWidth, height: idleHeight) }
+
+    private static func clamp(_ value: CGFloat, to range: ClosedRange<CGFloat>) -> CGFloat {
+        guard value.isFinite else { return range.lowerBound }
+        return min(max(value, range.lowerBound), range.upperBound)
+    }
+}
+
 enum NanoModuleID: String, CaseIterable, Identifiable, Codable, Sendable {
     case calendar
     case timer
@@ -226,6 +297,11 @@ final class NanoSettings: ObservableObject {
         static let appearance = "island.appearance"
         static let followActiveDisplay = "display.followActive"
         static let pinnedScreenID = "island.pinnedScreenID"
+        static let idleWidth = "island.idleWidth"
+        static let idleHeight = "island.idleHeight"
+        static let idleCornerRadius = "island.idleCornerRadius"
+        static let expandedCornerRadius = "island.expandedCornerRadius"
+        static let floatingTopOffset = "island.floatingTopOffset"
         static let blackOpacity = "appearance.blackOpacity"
         static let blurIntensity = "appearance.blurIntensity"
         static let gradientMidpoint = "appearance.gradientMidpoint"
@@ -343,6 +419,19 @@ final class NanoSettings: ObservableObject {
             } else {
                 defaults.removeObject(forKey: Key.pinnedScreenID)
             }
+        }
+    }
+
+    /// Idle size and corners, open corners, and the floating gap, one key per
+    /// value. Nothing is written until a value first changes.
+    @Published var islandGeometry: IslandGeometry {
+        didSet {
+            guard islandGeometry != oldValue else { return }
+            defaults.set(Double(islandGeometry.idleWidth), forKey: Key.idleWidth)
+            defaults.set(Double(islandGeometry.idleHeight), forKey: Key.idleHeight)
+            defaults.set(Double(islandGeometry.idleCornerRadius), forKey: Key.idleCornerRadius)
+            defaults.set(Double(islandGeometry.expandedCornerRadius), forKey: Key.expandedCornerRadius)
+            defaults.set(Double(islandGeometry.floatingTopOffset), forKey: Key.floatingTopOffset)
         }
     }
 
@@ -870,6 +959,19 @@ final class NanoSettings: ObservableObject {
         followActiveDisplay = defaults.object(forKey: Key.followActiveDisplay) == nil
             ? true
             : defaults.bool(forKey: Key.followActiveDisplay)
+        let standardGeometry = IslandGeometry.standard
+        // A local copy, so the closure doesn't capture `self` mid-initialization.
+        let store = defaults
+        let savedLength: (String, CGFloat) -> CGFloat = { key, fallback in
+            (store.object(forKey: key) as? NSNumber).map { CGFloat($0.doubleValue) } ?? fallback
+        }
+        islandGeometry = IslandGeometry(
+            idleWidth: savedLength(Key.idleWidth, standardGeometry.idleWidth),
+            idleHeight: savedLength(Key.idleHeight, standardGeometry.idleHeight),
+            idleCornerRadius: savedLength(Key.idleCornerRadius, standardGeometry.idleCornerRadius),
+            expandedCornerRadius: savedLength(Key.expandedCornerRadius, standardGeometry.expandedCornerRadius),
+            floatingTopOffset: savedLength(Key.floatingTopOffset, standardGeometry.floatingTopOffset)
+        )
         blackOpacity = defaults.object(forKey: Key.blackOpacity) == nil
             ? 0.92
             : defaults.double(forKey: Key.blackOpacity)
@@ -1211,6 +1313,12 @@ final class NanoSettings: ObservableObject {
         gradientMidpoint = 0.55
         surfaceColor = .black
         glassTintColor = .black
+    }
+
+    /// Back to the island's original size, corners and gap. Shape and surface
+    /// are left alone: those have their own reset.
+    func resetIslandGeometry() {
+        islandGeometry = .standard
     }
 
     func dashboardFeature(in area: DashboardArea) -> NanoModuleID? {
